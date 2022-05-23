@@ -1,0 +1,1227 @@
+---
+title: "Recommendation Systems"
+author: "YOUR NAME"
+date: "April 2020"
+output:
+  html_document:
+    highlight: haddock
+    number_sections: no
+    theme: journal
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+---
+  
+```{r setup, include = FALSE}
+# Set seed for reproducibility
+set.seed(202004)
+
+knitr::opts_chunk$set(
+  eval = TRUE,
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE
+)
+```
+
+# Learning Objective
+You will be able to implement basic recommendation system algorithms, interpret the findings for a general audience, and provide constructed guidance on the limitations of basic models and the potential for improving upon basic models.[^1]
+
+[^1]: This tutorial was originally developed by Eray Turkel, Susan Athey, and Niall Keleher for the Spring 2020 course, ALP301 Data-Driven Impact.
+
+# Introduction
+In this tutorial, we will review basic recommendation system algorithms.
+
+We want to make recommendations to users about which items to consume, based on a rating matrix. Each row in the matrix represents a user, and each column represents an item. There could be missing entries, but we will deal with that problem later. We can also incorporate user and item characteristics into our recommendations.
+
+Interspersed through the tutorial, we have included sections where your input is required. These are in the form of comprehension checks and assignment questions.
+
+---
+
+### Comprehension Check
+
+> *Here is where we will ask you to interpret or reflect on the data, analysis, or models used.*
+
+> [DISCUSS HERE]
+
+---
+
+
+```{r load_packages}
+# Load all packages needed to execute the job
+
+# Ensure that pacman is installed for package management and loading.
+if (!require("pacman")) install.packages("pacman")
+
+# for data reading wrangling and visualization
+pacman::p_load(tidyverse)
+# for working directories
+pacman::p_load(here)
+# Recommender Systems
+pacman::p_load(recommenderlab)
+# for parallel processing
+pacman::p_load(doFuture)
+# for updated ggplot2 theme
+pacman::p_load(hrbrthemes)
+# for updated ggplot2 colorblind-friendly scheme
+pacman::p_load(ggthemes)
+theme_set(hrbrthemes::theme_ipsum())
+```
+  
+# Data
+
+Let's start with a simple dataset, from the music platform lastFM, in Germany. The data is a matrix of dimensions 1257 x 285, which represents 1257 users and 285 artists. Each row represents which artists the user has listened to. Note that every entry in the matrix is either 1 (if the user listened to the artist) or 0 (if the user did not listen to the artist), so we will not have any missing entries in this dataset. We don't have user characteristics (like age, gender, etc.) or artist characteristics (genre of music, etc.).
+
+  
+```{r load_data}
+# Load data
+data_raw <- readr::read_csv(here::here("data", "lastfm-matrix-germany.csv"))
+```
+
+
+Broadly speaking, there are two approaches to making recommendations using a dataset like this. The first approach, item-item collaborative filtering, looks at similarities between the ratings of the items.
+  
+# Item-item recommendations
+
+This approach looks at an artist's rating vector, and looks for another artist with a similar rating vector to make recommendations. Intuitively, if artist i's listeners and artist j's listeners have a high degree of overlap, we will recommend artist j to artist i's listeners.
+
+As an example, let's say we know a user listens to Pink Floyd (artist no 205 in the data). Which band should we recommend to them?
+We take the column for Pink Floyd in our data, and look for the column that is the most 'similar' to this. 
+
+We will use [Jaccard Similarity](https://en.wikipedia.org/wiki/Jaccard_index) for simplicity, in this example. In other words, we look at the percentage overlap between the audiences of two artists. We take the number of people who listened to both artists, and divide by the total number of listeners for the two artists.
+
+$$
+\textit{Similarity(A,B)}=\frac{ |A \cap B| }{| A \cup B|}
+$$
+
+This will make recommendations like "Users who bought product X also bought product Y".
+
+Let's start by doing some data cleaning and calculating the cosine similarity between every column.
+
+```{r item_sim_matrix}
+
+# Content Based (Item-item approach)
+
+# Calculate Jaccard similarity
+
+# Drop the first column, which represents user ID
+ratings <- data_raw[, -1]
+
+# Save artist names in a vector, this will come in handy later on.
+artist_names <- colnames(ratings)
+
+# Transform the data frame object to a matrix, so we can do matrix operations
+ratings_matrix <- (matrix(as.numeric(unlist(ratings)), nrow = nrow(ratings)))
+
+# Calculate Jaccard similarity, based on the formula above
+# Calculate the symmetric matrix of audience overlap, with element (i,j) representing
+# the number of people who listen to both artist i and j.
+Jaccard_1 <- t(ratings_matrix) %*% (ratings_matrix)
+
+
+# Calculate the symmetric matrix of total
+# pairwise audience size, with elemt (i,j) representing the
+# total combined audience size of artist i and j.
+Jaccard_2 <- dim(ratings_matrix)[1] - t((ratings_matrix - 1) * (-1)) %*% ((ratings_matrix - 1) * (-1))
+
+
+# Create the Jaccard similarity matrix.
+# This is a symmetric matrix, with dimensions 285 x 285.
+# Divide Jaccard_1 element-wise by Jaccard_2.
+similarity_matrix <- Jaccard_1 / Jaccard_2
+```
+
+
+Now to find items to recommend based on a band that the user listens to, just look at other bands
+which have the highest similarity. Let's write a function to do this. Given an artist with number "i"", find the top X other artists to recommend to the listeners of artist "i".
+
+```{r top_x_function}
+Itemitem_top_X_recommendations <- function(index_of_band, X) {
+  # From the similarity matrix, lets get the vector corresponding to 'index of band'.
+  sim_vector <- similarity_matrix[-index_of_band, index_of_band]
+  index <- which(sim_vector >= sort(sim_vector, decreasing = T)[X], arr.ind = TRUE)
+  return(artist_names[index])
+}
+```
+
+Let's take a look at how this works. From our initial example, let's see what we recommend to a Pink Floyd listener.
+
+```{r top10_recs_a}
+# Look at the name of artist 205, just to re-confirm
+paste0("Artist 205 is: ", artist_names[205])
+
+# From the similarity matrix, lets get the vector corresponding
+# to 'index of band'.
+Itemitem_top_X_recommendations(205, 10)
+```
+These are all old rock bands, so it seems like we're on the right track. Let's try a couple of other artists.
+
+```{r top10_recs_b}
+paste0("Artist 10 is: ", artist_names[10])
+# Artist number 10, which should be Alicia Keys
+Itemitem_top_X_recommendations(10, 10)
+```
+
+
+--- 
+
+### Comprehension check
+> Modifying the code from code chunk `user_top10_b`, find the top 10 recommendations based on artist 157. Discuss whether the set of recommendations fits with a reasonable set of artists.
+
+```{r top10_recs_c}
+# [YOUR CODE HERE]
+```
+
+> [DISCUSS HERE]
+  
+--- 
+
+It's easy to transform this function to make recommendations to a user (called the 'active user' for the purposes of the algorithm) with a known list of interacted items. We use the similarity matrix to calculate a 'score' for each unknown item, which is the sum of the similarities with all of the active user's items.
+
+```{r item_based_function}
+Item_based_top_X_recommendations <- function(uservector, X) {
+  # Get the indices of artists that they listen to.
+  indexofartists <- which(uservector == 1)
+  # And the artists they don't know
+  unknown_artists <- uservector == 0
+  if (length(indexofartists) > 1) {
+    # If there are more than 1 known artists,
+    # Sum up the similarity scores of EVERY OTHER artist
+    # to the known artists. Save this as item_scores
+    item_scores <- colSums(similarity_matrix[indexofartists, ])
+  } else {
+    # If there is only 1 known artist
+    # save the similarity of EVERY OTHER artist
+    # to the only known artist
+    item_scores <- (similarity_matrix[indexofartists, ])
+  }
+  # Get the names of unknown artists
+  names_unknown <- artist_names[unknown_artists]
+  # Pick the top X scores from the item_scores vector and
+  # Check what artist these scores correspond to
+  # Return the names of the X resulting artists
+  index <- which(item_scores[unknown_artists] >= sort(item_scores[unknown_artists], decreasing = T)[X], arr.ind = TRUE)
+  return(names_unknown[index])
+}
+
+
+# Let's write another function to get the predicted score for ALL of the items
+# in our inventory for a given user.
+# This is the same function as above,
+# but instead of returning the top X recommendations,
+# returns the sum of the similarity scores of EVERY OTHER item
+# to the items that are already known.
+All_Item_Scores_IBCF <- function(uservector) {
+  index_known <- which(uservector != 0) # Get the indices of stories known.
+  index_unknown <- uservector == 0
+  if (length(index_known) > 1) {
+    item_scores <- colSums(similarity_matrix[index_known, ])
+  } else {
+    item_scores <- (similarity_matrix[index_known, ])
+  }
+  return(item_scores)
+}
+```
+  
+Now we can make recommendations to users, based on item similarities. Let's go back to user 145, who enjoys 70's and 80's rock music.
+
+```{r check_user}
+# USER 145
+# What do they listen to?
+artist_names[as.logical(ratings[145, ])]
+```
+
+Here's our top 10 recommended bands for this user:
+
+```{r user_top10_a}
+Item_based_top_X_recommendations(ratings[145, ], 10)
+```
+
+--- 
+
+### Comprehension check
+> Modifying the code from code chunk `user_top10_a`, find the top 10 recommendations for user 85. Discuss whether the set of recommendations fits with a reasonable set of artists.
+
+```{r user_top10_b}
+# [YOUR CODE HERE]
+```
+
+> [DISCUSS HERE]
+  
+--- 
+
+# User-item recommendations
+  
+Now let's make user-based recommendations. We will use a similarity based approach for users, which is what we previously did for artists. We will create a similarity matrix for users first. To make recommendations to user 'i', we will look at other users who have similar music tastes. Let us create our similarity matrix first.
+
+  
+```{r user_jaccard_similarity}
+# Calculate Jaccard similarity, based on the formula above
+
+# Calculate the symmetric matrix of common bands,
+# with element (i,j) representing
+# the number of artists listened both by user i and user j.
+Jaccard_1_user <- (ratings_matrix) %*% t(ratings_matrix)
+
+# Calculate the symmetric matrix of total
+# pairwise number of artists listened to,
+# with element (i,j) representing the
+# total combined number of artists listened by users i and j.
+Jaccard_2_user <- dim(ratings_matrix)[2] - ((ratings_matrix - 1) * (-1)) %*% t((ratings_matrix - 1) * (-1))
+
+# Create the Jaccard similarity matrix.
+# This is a symmetric matrix, with dimensions 1257 x 1257
+# Divide Jaccard_1 element-wise by Jaccard_2.
+similarity_matrix_user <- Jaccard_1_user / Jaccard_2_user
+```
+  
+
+Given our similarity matrix between users, we will calculate the predicted 'scores' of each artist that they haven't listened to. The predicted score of artist j for user i will be a weighted average of the scores given to artist 'j' by users similar to user i.
+
+$$
+\textit{Score}(user=i,item=j)=  \frac{\sum_{user: k \neq i} Similarity(i,k) * Rating(k,j) }{\sum_{user: k \neq i} Similarity(i,k)}
+$$
+  
+Here, Rating(k,j) will be either 1 (if user k listens to artist j), or 0 (if user k has not listened to artist j). This is a weighted average of all other ratings given to artist j, where the weights are based on the similarity between users.
+
+We're now ready to make our user-based recommendations.
+
+  
+```{r user_user_rec_function}
+
+User_top_X_recommendations <- function(userid, X, ratings_matrix) {
+  # We need to remove artists that they
+  # already listen to from our recommendations.
+  user_row <- ratings_matrix[userid, ]
+  known_artists <- user_row == 1
+  unknown_artists <- user_row == 0
+  other_users_ratings <- ratings_matrix[-userid, ]
+  Jaccard_1_user <- (ratings_matrix) %*% t(ratings_matrix)
+  Jaccard_2_user <- dim(ratings_matrix)[2] - ((ratings_matrix - 1) * (-1)) %*% t((ratings_matrix - 1) * (-1))
+  similarity_matrix_user <- Jaccard_1_user / Jaccard_2_user
+  similarity_vector <- as.vector(similarity_matrix_user[userid, -userid])
+  item_scores <- (similarity_vector %*% other_users_ratings) / sum(similarity_vector)
+  names_unknown <- artist_names[unknown_artists]
+  index <- which(item_scores[unknown_artists] >= sort(item_scores[unknown_artists],
+    decreasing = T
+  )[X], arr.ind = TRUE)
+  return(names_unknown[index])
+}
+
+
+# Another function to get ALL of the predicted scores for a user.
+All_Item_Scores_UBCF <- function(userid, ratings_matrix) {
+  user_row <- ratings_matrix[userid, ]
+  known_stories <- user_row == 1
+  unknown_stories <- user_row == 0
+  other_users_ratings <- ratings_matrix[-userid, ]
+  sim1 <- (ratings_matrix) %*% t(ratings_matrix)
+  sim2 <- dim(ratings_matrix)[2] - ((ratings_matrix - 1) * (-1)) %*% t((ratings_matrix - 1) * (-1))
+  similarity_matrix_user <- sim1 / sim2
+  similarity_vector <- as.vector(similarity_matrix_user[userid, -userid])
+  item_scores <- (similarity_vector %*% other_users_ratings) / sum(similarity_vector)
+  return(item_scores)
+}
+```
+
+
+Let's now try our new user based recommendation system. First, have a look at user 145 again.
+
+```{r user_choices}
+# USER 145
+# What do they listen to?
+artist_names[as.logical(ratings[145, ])]
+```
+
+Let's make 10 user based recommendations to user 145. It seems to work reasonably well - these are mostly 70's-80's rock bands as well.
+
+```{r user_top10_c}
+# Our top 10 recommendations
+User_top_X_recommendations(145, 10, ratings_matrix)
+```
+
+--- 
+
+### Comprehension check
+> Let's take a look again at the results from the item-based recommendations for user 145 (repeating code chunk `user_top10_a`):
+
+```{r user_top10_new}
+Item_based_top_X_recommendations(ratings[145, ], 10)
+```
+
+> How do these recommendations compare to those generated above from the user-based recommendation function (code chunk `user_top10_c`)? Which method (item based or user based) creates more "diverse" outcomes in terms of recommending unpopular artists? Why do you think that is?
+
+> [DISCUSS HERE]
+
+---
+
+
+We need a better, more objective way of evaluating our recommendations than by simply inspecting the output for random users before deploying an algorithm to production. A good metric for binary recommendations that is used is called 'Precision at K' or 'Recall at K'. This is precision and the recall of our model when we can make K recommendations to our users.
+
+$$
+\textit{Precision at K}=Mean\left(\frac{\textit{Number of items recommended and used}}{K}\right)
+$$
+Precision measures the following: if our algorithm makes K recommendations to every user, what percentage of those K recommended items actually end up being used, on average?
+
+$$
+\textit{Recall at K}=Mean\left(\frac{\textit{Number of items recommended and used}}{\textit{Total items used}}\right)
+$$
+Recall measures the following: if our algorithm makes K recommendations to every user, what percentage of total user activity is coming from recommended items, on average?
+
+Note the subtle difference in these two definitions and the shortcomings of these measurements. These can only measure the performance at a fixed number of recommendations. Precision measures performance relative to the number of items recommended. Recall measures performance relative to all user activity.
+
+
+We can also use RMSE: treating our algorithms as purely predictive, we get the predicted score for all of the items (using the functions we wrote above), and calculate the average error over the dataset.
+
+$$
+\textit{Root Mean Squared Error:} \sqrt{Average((Predicted Rating-Actual Rating)^2)}
+$$
+
+RMSE is measuring how far our predicted ratings are from the actual ratings, on average. We take the square of the distance between predicted and actual ratings because we don't want overpredictions and underpredictions to cancel each other out. We calculate the average over all users, and then take the square root to undo the squaring that we did in the first step, and move things to a more natural scale. RMSE is in the same scale with the ratings, so an RMSE of 0.5 means our algorithm's predictions of the ratings are on average 0.5 points away from the actual ratings. "Ratings" in our setting are the scores that we calculate with our functions written above.
+
+Let us now evaluate our algorithms. When calculating precision and recall, each user in the test set is taken as the current 'active user', and a random subset of their existing history is hidden. This means we will randomly remove part of the artists they listen to, and see how well our recommendations match with the held out data. This means we cannot measure the performance of any algorithm for new users or users with no history.
+
+There are various ways of doing this, and here we will use 'all but k'. For example, in "all but 1", if the user listened to 10 artists, we will use 9 of those to predict the 10th, or in "all but 5" we will use 5 of those to predict the remaining 5. Note that when evaluating performance using the 'all but k' approach, we can only use users who have interacted with more than 'k' items.
+
+First, let's look at how the activity of users are distributed. Recommender systems usually do better for active users, and we will see this in our dataset. Let's plot the number of bands listened to per user, and listeners per artist.
+
+```{r artist_per_user}
+artist_per_user <- (rowSums(ratings_matrix))
+ggplot(data = data.frame(artist_per_user), aes(x = (artist_per_user))) +
+  geom_histogram(binwidth = 5) +
+  xlab("Unique artists listened to per user") +
+  ggtitle("Histogram of number of artists listened to")
+```
+Note that most users listen to less than 10 artists. There is a small subset of users that are very active (30+ artists)
+
+```{r listeners_per_artist}
+listeners_per_artist <- (colSums(ratings_matrix))
+ggplot(data = data.frame(listeners_per_artist), aes(x = (listeners_per_artist))) +
+  geom_histogram(binwidth = 15) +
+  xlab("Unique listeners per artist") +
+  ggtitle("Histogram of listeners per artist")
+```
+Observe that the vast majority of artists are not very popular. About 200 artists (out of 285 total) get less than 50 unique listeners. A very small number are very popular: they get more than 150 unique listeners.
+
+# Performance of item based recommendations
+
+```{r performance_item_based}
+# All but K approach, testing function:
+test_all_but_k <- function(k, recommender_function, ratings_matrix) {
+
+  # initiate a vector to collect precision values
+  precision_vector <- vector()
+
+  # initiate a vector to collect recall values
+  recall_vector <- vector()
+
+  # same for RMSE
+  rmse_vector <- vector()
+
+  # loop through users
+  for (userid in 1:nrow(ratings_matrix)) {
+    user <- ratings_matrix[userid, ]
+    index_of_known <- which(user == 1)
+    if (length(index_of_known) > k) {
+      takeout <- sample(1:length(index_of_known), size = k)
+      bands_removed <- index_of_known[takeout]
+      user[bands_removed] <- 0
+      ratings_matrix[userid, ] <- user
+      recommended <- recommender_function(user, k)
+      matched <- length(intersect(artist_names[bands_removed], recommended))
+      precision_vector <- append(precision_vector, matched / k)
+      recall_vector <- append(recall_vector, (matched / (length(index_of_known))))
+      user[bands_removed] <- 1
+      ratings_matrix[userid, ] <- user
+      itemscores <- All_Item_Scores_IBCF(ratings_matrix[userid, ])
+      rmse <- sqrt(mean((ratings_matrix[userid, ] - itemscores)^2))
+      rmse_vector <- append(rmse_vector, rmse)
+    }
+  }
+  return(c("Precision" = mean(precision_vector), "Recall" = mean(recall_vector), " RMSE" = mean(rmse_vector)))
+}
+# Performance of item based recommendations
+test_all_but_k(1, Item_based_top_X_recommendations, ratings_matrix)
+test_all_but_k(5, Item_based_top_X_recommendations, ratings_matrix)
+test_all_but_k(10, Item_based_top_X_recommendations, ratings_matrix)
+```
+
+# Performance of user based recommendations
+
+```{r performance_user_based}
+# All but K approach, testing function
+# We will evaluate it in the first 100 users, to save time,
+# because matrix operations take a long time to compute.
+# Note that we need to re-calculate tha Jaccard matrix for every user when we hide
+# part of their history. Try running this for the full dataset on your own.
+
+test_all_but_k_users <- function(k, recommender_function, ratings_matrix) {
+
+  # initiate a vector to collect precision values
+  precision_vector <- vector()
+
+  # initiate a vector to collect recall values
+  recall_vector <- vector()
+
+  #
+  rmse_vector <- vector()
+
+  # Change the line below to run the test on the entire dataset
+  num_rows <- min(100, nrow(ratings_matrix))
+
+  # loop through users
+  for (userid in 1:num_rows) {
+    user <- ratings_matrix[userid, ]
+    index_of_known <- which(user == 1)
+    if (length(index_of_known) > k) {
+      takeout <- sample(1:length(index_of_known), size = k)
+      bands_removed <- index_of_known[takeout]
+      ratings_matrix[userid, bands_removed] <- 0
+      recommended <- recommender_function(userid, k, ratings_matrix)
+      matched <- length(intersect(artist_names[bands_removed], recommended))
+      precision_vector <- append(precision_vector, matched / k)
+      recall_vector <- append(recall_vector, (matched / (length(index_of_known))))
+      ratings_matrix[userid, bands_removed] <- 1
+      itemscores <- All_Item_Scores_IBCF(ratings_matrix[userid, ])
+      rmse <- sqrt(mean((ratings_matrix[userid, ] - itemscores)^2))
+      rmse_vector <- append(rmse_vector, rmse)
+    }
+  }
+  return(c("Precision" = mean(precision_vector), "Recall" = mean(recall_vector), "RMSE" = mean(rmse_vector)))
+}
+```
+
+```{r test_1}
+# Performance of user based recommendations
+test_all_but_k_users(1, User_top_X_recommendations, ratings_matrix)
+```
+
+```{r test_5}
+test_all_but_k_users(5, User_top_X_recommendations, ratings_matrix)
+```
+
+```{r test_10}
+test_all_but_k_users(10, User_top_X_recommendations, ratings_matrix)
+```
+
+Now, we have the functions to evaluate our algorithms on any input. 
+
+Let's compare the performance of our algorithms in very active vs. not very active users.
+
+
+```{r compare_performance}
+active_users_matrix <- ratings_matrix[rowSums(ratings_matrix) > 20, ]
+non_active_users_matrix <- ratings_matrix[rowSums(ratings_matrix) < 10, ]
+
+paste0("Results in active users, item-based recommendations")
+test_all_but_k(5, Item_based_top_X_recommendations, active_users_matrix)
+paste0("Results in non-active users, item-based recommendations")
+test_all_but_k(5, Item_based_top_X_recommendations, non_active_users_matrix)
+
+
+paste0("Results in active users, user-based recommendations")
+test_all_but_k_users(5, User_top_X_recommendations, active_users_matrix)
+paste0("Results in non-active users, user-based recommendations")
+test_all_but_k_users(5, User_top_X_recommendations, non_active_users_matrix)
+```
+
+Note that how recall behaves is different from precision, because we divide by the number of items used for each user.
+
+# Diversity of Recommendations
+Let's also analyze what kind of artists our functions are recommending. Let's save all the top 1 and top 5 recommendations we make for our users, and look at their popularity.
+
+
+```{r diversity_item_based_recs}
+
+# top recommendation
+recommender_results_item_one <- vector()
+for (i in 1:nrow(ratings)) {
+  recommender_results_item_one <- union(
+    recommender_results_item_one,
+    Item_based_top_X_recommendations(ratings[i, ], 1)
+  )
+}
+
+# top 5 recommendations
+recommender_results_item_five <- vector()
+for (i in 1:nrow(ratings)) {
+  recommender_results_item_five <- union(
+    recommender_results_item_five,
+    Item_based_top_X_recommendations(ratings[i, ], 5)
+  )
+}
+
+# First, note how many bands in total are recommended, out of 285:
+length(recommender_results_item_one)
+length(recommender_results_item_five)
+```
+
+Now, check the popularity of the bands our algorithm recommends, versus the popularity of all of the artists in the data.
+
+```{r plot_item_based_recs}
+index_results_one <- which(recommender_results_item_one %in% artist_names)
+index_results_five <- which(recommender_results_item_five %in% artist_names)
+
+popularity_ones <- colSums(ratings_matrix[, index_results_one])
+popularity_fives <- colSums(ratings_matrix[, index_results_five])
+
+
+listeners_per_artist <- (colSums(ratings_matrix))
+
+# Create a data frame of recommendations
+df1 <- data.frame(x = listeners_per_artist, label = rep("Overall", length(listeners_per_artist)))
+df2 <- data.frame(x = popularity_fives, label = rep("Five_Recs", length(popularity_fives)))
+df3 <- data.frame(x = popularity_ones, label = rep("One_Rec", length(popularity_ones)))
+df <- rbind(df1, df2, df3)
+
+# Plot the number of listeners per artist
+ggplot(df, aes(x, y = ..count.., fill = label)) +
+  geom_density(color = "black", alpha = 0.5) +
+  xlab("Number of listeners") +
+  ylab("Density") +
+  scale_fill_colorblind()
+
+```
+
+
+Let's check the same thing for user-based recommendations.
+
+```{r  diversity_user_based_recs}
+
+# Note: This might take a while to run
+recommender_results_item_one <- vector()
+recommender_results_item_five <- vector()
+
+# Set up parallel processing
+all_cores <- min(parallel::detectCores(logical = FALSE), 7)
+doFuture::registerDoFuture()
+cl <- parallel::makeCluster(all_cores)
+future::plan("cluster", workers = cl)
+
+# Export objects to the parallel sessions
+clusterExport(cl, c("ratings_matrix", "User_top_X_recommendations", "artist_names", "ratings"))
+
+recommender_results_item_one <- foreach(i = 1:nrow(ratings), .combine = append) %dopar% {
+  return(User_top_X_recommendations(i, 1, ratings_matrix))
+}
+
+recommender_results_item_five <- foreach(i = 1:nrow(ratings), .combine = append) %dopar% {
+  return(User_top_X_recommendations(i, 5, ratings_matrix))
+}
+
+parallel::stopCluster(cl)
+
+recommender_results_item_one <- unique(recommender_results_item_one)
+recommender_results_item_five <- unique(recommender_results_item_five)
+
+# First, note how many bands in total are recommended, out of 285:
+length(recommender_results_item_one)
+length(recommender_results_item_five)
+```
+
+Now, check the popularity of the bands our user based algorithm recommends, versus all of the bands. Below, we plot the distribution of number of listeners for all the artists in our dataset, for the output of our item-based algorithm when making five recommendations for each user, and for the outputs when making a single recommendation for every user.
+```{r plot_user_based_recs}
+index_results_one <- which(recommender_results_item_one %in% artist_names)
+index_results_five <- which(recommender_results_item_five %in% artist_names)
+
+popularity_ones <- colSums(ratings_matrix[, index_results_one])
+popularity_fives <- colSums(ratings_matrix[, index_results_five])
+
+# Create data frame
+df1 <- data.frame(x = listeners_per_artist, label = rep("Overall", length(listeners_per_artist)))
+df2 <- data.frame(x = popularity_fives, label = rep("Five_Recs", length(popularity_fives)))
+df3 <- data.frame(x = popularity_ones, label = rep("One_Rec", length(popularity_ones)))
+df <- rbind(df1, df2, df3)
+
+# Plot the number of listeners per user
+ggplot(df, aes(x, y = ..count.., fill = label)) +
+  geom_density(color = "black", alpha = 0.3) +
+  xlab("Number of listeners") +
+  ylab("Density") +
+  scale_fill_colorblind()
+
+
+```
+
+
+Notice the second "peak" for one_rec around 80. Making single recommendations seems to pick more popular artists.
+# Matrix Factorization and Dimensionality Reduction
+
+Let's create a lower dimensional representation of the user-artist matrix. This will make computation easier, especially with larger datasets.
+
+Given a matrix X, the singular value decomposition (SVD) 'decomposes' it to three other matrices as X= U S V'. This is a simple idea from linear algebra which decomposes every matrix to three parts: the matrix U carries the information about the ROWS, and the matrix V carries information about the COLUMNS. S is the scaling matrix which carries information about the numerical scale of the values in the matrix. For more details, you can read :
+
+https://en.wikipedia.org/wiki/Singular_value_decomposition
+
+This gives us two matrices, U and V, where U carries user information, and V carries artist information. Now, U will have dimensions 1257 by 1257, (number of users), and V will have dimensions 285 by 285, (the number of artists).
+
+We set out to reduce our dimensionality and computational burden, but we ended up with TWO huge matrices. How is this decomposition helpful?
+
+It turns out that most of the information in the decomposition can be captured by using a small part of two matrices, instead of the using the entirety of the two matrices. Intuitively, the 'most important' information in the user activity can be captured by using the first few columns of the U matrix, and similarly for the V matrix. So instead of working with U (1257 by 1257) and V (285 by 285), we can pick a small number of dimensions, for example 'd'=10. We pick the first 10 columns of U (so, 1257 by 10) and the first 10 rows of V (so, 10 by 285).
+
+The new matrix U (1257 by 10) roughly represents a 'user characteristics' matrix, where every user is represented by 10 features. You can think of this as a 10-feature summary of the user activity. 
+
+Similarly, the new matrix V (10 by 285) represents an 'item characteristics' matrix, (transposed). Every artist is represented by a 10-feature characteristic.
+
+Since every row in U represents a user, and every column in V represent an item, we are ready to make recommendations.
+
+Remember that the original rating matrix was the decomposition X= U S V' ? If we use the full-dimensional U and V, and multiply them, we get back the original matrix X.  Now, we will be using part of matrix U (10 columns) and part of matrix V (10 rows) to 'approximate' entries of X. To predict the rating of item 50 for user 200, we take the 200th row of the adjusted U matrix (10-dimensional vector), and the 50th column of the V matrix (another 10 dimensional vector) and multiply them. The result is our 'predicted' entry for (200,50) in the 'predicted rating matrix' X. 
+
+We will generate our 'predicted' entries in the new 'predicted ratings matrix' X. We won't get back the original rating matrix, because we discarded some of the information by picking only 10 dimensions. But you will see that using this rough approximation, you can make pretty accurate predictions and useful recommendations, and computation will be pretty fast.
+
+
+```{r matrix_factorize}
+
+# Let's start with a 5-dimensional representation
+d <- 5
+U <- svd(ratings_matrix, nu = d, nv = d)$u
+Vprime <- svd(ratings_matrix, nu = d, nv = d)$v
+```
+
+```{r svd_function}
+# Top recommendations based on low dimensional representation:
+
+SVD_top_X_recommendations <- function(U, Vprime, userid, X, ratings_matrix) {
+  # Save a user's vector from the decomposition
+  user_vector <- U[userid, ]
+  # calculate the predicted score for every item
+  # by taking the matrix product of the user row
+  # with the V matrix.
+  scores <- U[userid, ] %*% t(Vprime)
+  user_row <- ratings_matrix[userid, ]
+  # Keep track of known and unknown items
+  known_artists <- user_row == 1
+  unknown_artists <- user_row == 0
+  names_unknown <- artist_names[unknown_artists]
+  # Extract the top X scores from the unknown items
+  index <- which(scores[as.logical(unknown_artists)] >= sort(scores[as.logical(unknown_artists)], decreasing = T)[X], arr.ind = TRUE)
+  return(names_unknown[index])
+}
+
+# Save the raw scores for ALL of the items.
+SVD_item_scores <- function(U, Vprime, userid) {
+  user_vector <- U[userid, ]
+  scores <- U[userid, ] %*% t(Vprime)
+  return(scores)
+}
+```
+
+Let us make recommendations to user 145 again.
+
+```{r svd_top_recs}
+artist_names[as.logical(ratings[145, ])]
+
+SVD_top_X_recommendations(U, Vprime, 145, 10, ratings_matrix)
+```
+
+```{r test_svd_function}
+# All but K approach, testing function for SVD:
+d <- 5
+# Again, running this on only 300 users to save time.
+# Note that we need to re-compute the SVD for each user when evaluating the performance.
+
+test_all_but_k_SVD <- function(k, recommender_function, ratings_matrix, d) {
+  # Change the line below to run the test on the entire dataset
+  num_rows <- min(300, nrow(ratings_matrix))
+  precision_vector <- rep(0, num_rows)
+  recall_vector <- rep(0, num_rows)
+  rmse_vector <- vector()
+  for (userid in 1:num_rows) {
+    user <- ratings_matrix[userid, ]
+    index_of_known <- which(user == 1)
+    if (length(index_of_known) > k) {
+      takeout <- sample(1:length(index_of_known), size = k)
+      bands_removed <- index_of_known[takeout]
+      user[bands_removed] <- 0
+      ratings_matrix[userid, ] <- user
+      svdcomp <- svd(ratings_matrix, nu = d, nv = d)
+      U <- svdcomp$u
+      Vprime <- svdcomp$v
+      recommended <- recommender_function(U, Vprime, userid, k, ratings_matrix)
+      matched <- length(intersect(artist_names[bands_removed], recommended))
+      precision_vector[userid] <- (matched / k)
+      recall_vector[userid] <- (matched / (length(index_of_known)))
+      user[bands_removed] <- 1
+      ratings_matrix[userid, ] <- user
+      svdcomp <- svd(ratings_matrix, nu = d, nv = d)
+      U <- svdcomp$u
+      Vprime <- svdcomp$v
+      allscores <- SVD_item_scores(U, Vprime, userid)
+      rmse <- sqrt(mean((allscores - ratings_matrix[userid, ])^2))
+      rmse_vector <- append(rmse_vector, rmse)
+    }
+  }
+  return(c("Precision" = mean(precision_vector), "Recall" = mean(recall_vector), "RMSE" = mean(rmse_vector)))
+}
+```
+
+```{r test_svd_1}
+# Performance of SVD-based recommendations (top recommendation)
+test_all_but_k_SVD(1, SVD_top_X_recommendations, ratings_matrix, d)
+```
+
+```{r test_svd_5}
+# Performance of SVD-based recommendations (top 5 recommendations)
+test_all_but_k_SVD(5, SVD_top_X_recommendations, ratings_matrix, d)
+```
+
+```{r test_svd_10}
+# Performance of SVD-based recommendations (top 10 recommendations)
+test_all_but_k_SVD(10, SVD_top_X_recommendations, ratings_matrix, d)
+```
+
+How do we choose how many dimensions to use? It's a good idea to do cross-validation, using precision at K as our metric.
+
+```{r crossval_rec_sys, eval=FALSE}
+# This is not run by default.
+# Because it takes a long time to compute.
+# Make sure you have enough time/computing power
+# and run it yourself by changing "eval=TRUE" above.
+
+# 5-fold cross validation
+folds <- 5
+splitfolds <- sample(1:folds, nrow(ratings_matrix), replace = TRUE)
+candidate_d <- c(2, 3, 4, 5, 6, 7, 8, 9, 10) # Candidate no of dimensions
+k <- 5 # We will use precision/recall at 5
+
+
+# Set up parallel processing
+all_cores <- parallel::detectCores(logical = FALSE)
+doFuture::registerDoFuture()
+cl <- parallel::makeCluster(all_cores)
+future::plan("cluster", workers = cl)
+
+# Export objects to the parallel sessions
+clusterExport(cl, c("ratings_matrix", "splitfolds", "folds", "candidate_d", "SVD_top_X_recommendations", "test_all_but_k_SVD", "k"))
+
+
+results_cv_svd <- foreach(j = 1:length(candidate_d), .combine = rbind) %dopar% {
+  d <- candidate_d[j]
+  # Initiate a matrix for cross validation results
+  results_cv <- matrix(0, nrow = 1, ncol = 3)
+  colnames(results_cv) <- c("d", "precision at 5", "recall at 5")
+  # Initiate precision vector
+  mean_precision_vec <- rep(0, folds)
+  # Initiate recall vector
+  mean_recall_vec <- rep(0, folds)
+  for (i in 1:folds) {
+    # set up the training and validation folds
+    train_set <- ratings_matrix[splitfolds != i, ]
+    valid_set <- ratings_matrix[splitfolds == i, ]
+    # Get the item characteristics (V) from the training set SVD
+    Vprime <- svd(train_set, nu = d, nv = d)$v
+    precision_vector <- rep(0, nrow(valid_set))
+    recall_vector <- rep(0, nrow(valid_set))
+    # Loop over users in the validation set
+    for (userid in 1:nrow(valid_set)) {
+      user <- valid_set[userid, ]
+      index_of_known <- which(user == 1)
+      if (length(index_of_known) > k) {
+        takeout <- sample(1:length(index_of_known), size = k)
+        bands_removed <- index_of_known[takeout]
+        user[bands_removed] <- 0
+        valid_set[userid, ] <- user
+        valid_u <- valid_set %*% Vprime
+        recommended <- SVD_top_X_recommendations(valid_u, Vprime, userid, k, valid_set)
+        matched <- length(intersect(artist_names[bands_removed], recommended))
+        precision_vector[userid] <- (matched / k)
+        recall_vector[userid] <- (matched / (length(index_of_known)))
+        user[bands_removed] <- 1
+        valid_set[userid, ] <- user
+      }
+    }
+    mean_precision_vec[i] <- mean(precision_vector)
+    mean_recall_vec[i] <- mean(recall_vector)
+  }
+  results_cv[1, ] <- c(d, mean(mean_precision_vec), mean(mean_recall_vec))
+  return(results_cv)
+}
+
+parallel::stopCluster(cl)
+```
+
+Let's plot the results.
+
+```{r plot_svd}
+## Uncomment the code below and run when you're finished with the cross-validation
+# ggplot(data = data.frame(results_cv_svd), aes(x = d, y = precision.at.5)) +
+#   geom_line() +
+#   xlab("Number of dimensions in SVD") +
+#   ylab("Precision at 5")
+```
+
+
+# Movies Dataset
+
+Now, let's analyze a different dataset. We will use movie ratings that come from a more sparse dataset: users are less active and there are lots of missing entries. These data are included in the `recommenderlab` package.
+
+```{r load_data_books}
+# load the MovieLense data from the recommenderlab package
+data(MovieLense)
+ratings_matrix <- MovieLense
+```
+
+Let's now create our user-rating matrix, with possibly missing values. For convenience, we are going to use the `recommenderlab` package to implement recommendation algorithems with the Movies dataset. The underlying principles are the same as what we covered above. For an introduction to the `recommenderlab` package see [recommenderlab:A Framework for Developing and Testing Recommendation Algorithms](https://cran.r-project.org/web/packages/recommenderlab/vignettes/recommenderlab.pdf).
+
+```{r create_books_user_mat}
+# Count non-zero values in the ratings matrix
+num_nonNA <- nnzero(recommenderlab::getRatingMatrix(MovieLense), na.counted = FALSE)
+
+# Count total entries in the ratings matrix
+num_entries <- dim(recommenderlab::getRatingMatrix(MovieLense))[1] * dim(recommenderlab::getRatingMatrix(MovieLense))[2]
+
+# What percentage of the matrix is missing data?
+(num_entries - num_nonNA) / num_entries
+```
+
+Now that we have a (very sparse!) matrix where almost 93.6% of the entries are missing, how can we make recommendations?
+
+It turns out we can impute the missing values using specialized algorithms.
+
+The funkSVD algorithm calculates the SVD of the utility matrix using only the non-missing entries, then it uses the output to impute values for the missing entries. This is one of the algorithms that performed really well in Netflix Prize challenge for recommending movies to users. See Simon Funk's original blog post describing the method here for additional details:
+
+https://sifter.org/~simon/journal/20061211.html
+
+The functions below do adjusted versions of the item based, user based, and SVD-based recommendations described above in the lastFM dataset with no missing data. The item based and user based similarity algorithms use only non-missing data to calculate similarities.
+
+We train 3 models below, item-based, user-based, and matrix factorization (Funk SVD).
+
+```{r train_models}
+
+# We can only evaluate and run our algorithms
+# on users that have read at least 2 books.
+# Given 1 observation, we try to predict the other.
+# Otherwise, these methods fail.
+# What would you do with users who have less than 2 books read?
+
+# create a training set with 70% of the data and split 30% as a test dataset
+eval_scheme <- recommenderlab::evaluationScheme(ratings_matrix,
+  method = "split",
+  train = 0.7, given = -1, goodRating = 4
+)
+
+# item-based nearest neighbors using cosine similarity
+IBCF_model <- recommenderlab::Recommender(
+  recommenderlab::getData(eval_scheme, "train"),
+  method = "IBCF"
+)
+
+# used-based nearest neighbors using cosine similarity
+UBCF_model <- recommenderlab::Recommender(
+  recommenderlab::getData(eval_scheme, "train"),
+  method = "UBCF"
+)
+
+# Funk SVD algorithm
+SVD_model <- recommenderlab::Recommender(
+  recommenderlab::getData(eval_scheme, "train"),
+  method = "SVDF", param = list(k = 5)
+)
+```
+
+
+Next, let's make recommendations and see our algorithms in action.
+
+```{r make_recs}
+# Get predicted ratings for all items
+
+## Predicted values from item-based model
+pred_IBCF <- predict(IBCF_model,
+  recommenderlab::getData(eval_scheme, "known"),
+  type = "ratings", n = c(1)
+)
+
+## Predicted values from user-based model
+pred_UBCF <- predict(UBCF_model,
+  recommenderlab::getData(eval_scheme, "known"),
+  type = "ratings", n = c(1)
+)
+
+## Predicted values from SVD model
+pred_svd <- predict(SVD_model,
+  recommenderlab::getData(eval_scheme, "known"),
+  type = "ratings", n = c(1)
+)
+```
+
+We can also extract the top 5 recommendations from each model.
+
+```{r top5_recs}
+# Get top 5 recommendations
+topn_IBCF <- predict(IBCF_model,
+  recommenderlab::getData(eval_scheme, "known"),
+  n = 5
+)
+
+topn_UBCF <- predict(UBCF_model,
+  recommenderlab::getData(eval_scheme, "known"),
+  n = 5
+)
+
+topn_svd <- predict(SVD_model,
+  recommenderlab::getData(eval_scheme, "known"),
+  n = 5
+)
+```
+
+And get performance metrics for each model.
+
+```{r eval_3methods}
+# Evaluate methods
+
+res_ibcf <- recommenderlab::evaluate(eval_scheme,
+  method = "IBCF",
+  type = "topNList", n = c(1, 3)
+)
+
+res_ubcf <- recommenderlab::evaluate(eval_scheme,
+  method = "UBCF",
+  type = "topNList", n = c(1, 3)
+)
+
+res_svdf <- recommenderlab::evaluate(eval_scheme,
+  method = "SVDF",
+  type = "topNList", n = c(1, 3)
+)
+```
+
+Get the precision and recall with 1 & 3 recommendations:
+
+```{r confmat_ibcf}
+recommenderlab::getConfusionMatrix(res_ibcf)[[1]]
+```
+
+```{r confmat_ubcf}
+recommenderlab::getConfusionMatrix(res_ubcf)[[1]]
+```
+
+```{r confmat_svdf}
+recommenderlab::getConfusionMatrix(res_svdf)[[1]]
+```
+
+
+Get the mean squared errors
+```{r rmse}
+errors <- rbind(
+  IBCF = recommenderlab::calcPredictionAccuracy(pred_IBCF,
+    recommenderlab::getData(eval_scheme, "unknown"),
+    goodRating = 4, n = c(1), given = -1
+  ),
+  UBCF = recommenderlab::calcPredictionAccuracy(pred_UBCF,
+    recommenderlab::getData(eval_scheme, "unknown"),
+    goodRating = 4, n = c(1), given = -1
+  ),
+  SVD = recommenderlab::calcPredictionAccuracy(pred_svd,
+    recommenderlab::getData(eval_scheme, "unknown"),
+    goodRating = 4, n = c(1), given = -1
+  )
+)
+
+errors
+```
+
+
+The below function allows you to explore the data, by inputting a user number, and returns the movies rated and the ratings for that user.
+
+```{r explore_user_function}
+
+ratings_matrix <- recommenderlab::getRatingMatrix(MovieLense)
+
+explore_user <- function(userid, ratings_matrix) {
+  if (sum(ratings_matrix[userid, ], na.rm = TRUE) > 0) {
+    indices_rated <- which((ratings_matrix[userid, ]) > 0)
+    titles <- names(indices_rated)
+    return(titles)
+  }
+  return("No movies rated by this user")
+}
+
+explore_user(55, ratings_matrix)
+```
+
+What can we recommend to user 55?
+
+The following function allows you to input recommendations and outputs book names and authors.
+
+```{r get_user_rec_function}
+
+# Save recommendation outputs to a dataframe.
+
+ibcf <- data.frame(
+  user = sort(rep(1:length(topn_IBCF@items), topn_IBCF@n)),
+  rating = unlist(topn_IBCF@ratings), index = unlist(topn_IBCF@items)
+)
+
+ubcf <- data.frame(
+  user = sort(rep(1:length(topn_UBCF@items), topn_UBCF@n)),
+  ubcfrating = unlist(topn_UBCF@ratings), index = unlist(topn_UBCF@items)
+)
+
+svd <- data.frame(
+  user = sort(rep(1:length(topn_svd@items), topn_svd@n)),
+  rating = unlist(topn_svd@ratings), index = unlist(topn_svd@items)
+)
+
+get_user_recommendations <- function(userid, model, ratings_matrix) {
+  ratings_matrix <- recommenderlab::getRatingMatrix(MovieLense)
+  model %>% dplyr::filter(user == userid) -> recs
+  recs <- colnames(ratings_matrix)[recs$index]
+  return(recs)
+}
+```
+
+Let's review recommendations from each method.
+
+```{r item_movie_recs}
+# Item based recommendations
+get_user_recommendations(22, ibcf, recommenderlab::getRatingMatrix(MovieLense))
+```
+
+
+```{r user_movie_recs}
+# User based recommendations
+get_user_recommendations(22, ubcf, recommenderlab::getRatingMatrix(MovieLense))
+```
+
+```{r svd_book_recs}
+# SVD recommendations
+get_user_recommendations(22, svd, recommenderlab::getRatingMatrix(MovieLense))
+```
+
+---
+
+### Comprehension Check
+
+> We can only evaluate performance on users who have read at least one book. This is true for any offline evaluation. To test the performance of our recommendations, we need to compare them against what the user has interacted with. If the user hasn't interacted with anything, our evaluation fails.
+
+> Using the code from the `make_recs`, `eval_1`, and `rmse` code chunks above, evaluate the performance of the three algorithms (FunkSVD, item based similarity, user based similarity) in the active / nonactive users dataset created below. Compare precision and recall using the 'all but K' approach. How is the performance on active users? How is the performance on not-so-active users? Which one performs best on which subgroup? 
+
+
+```{r performance_active}
+# # Uncumment and run the code below
+# # filter active users
+# # More than 100 movies rated
+ratings_matrix <- recommenderlab::getRatingMatrix(MovieLense)
+ratings_matrix_active <- ratings_matrix[rowSums(ratings_matrix != 0, na.rm = TRUE) > 100, ]
+r_active <- as(ratings_matrix_active, "realRatingMatrix")
+# #Less than 100 movies rated
+ratings_matrix_nonactive <- ratings_matrix[rowSums(ratings_matrix != 0, na.rm = TRUE) < 100, ]
+r_nonactive <- as(ratings_matrix_nonactive, "realRatingMatrix")
+```
+
+
+```{r recommendations_active}
+# eval_scheme <- recommenderlab::evaluationScheme(r_active, method="split", train=0.7, given=-1, goodRating=4 )
+# # item-based nearest neighbors using cosine similarity
+# IBCF_model <- recommenderlab::Recommender(recommenderlab::getData(eval_scheme, "train"), method = "IBCF")
+# # used-based nearest neighbors using cosine similarity
+# UBCF_model <- recommenderlab::Recommender(recommenderlab::getData(eval_scheme, "train"), method = "UBCF")
+# # Funk SVD algorithm
+# SVD_model <- recommenderlab::Recommender(recommenderlab::getData(eval_scheme, "train"), method = "SVDF", param=list(k=5))
+#
+#
+# topn_IBCF<-predict(IBCF_model, recommenderlab::getData(eval_scheme, "known"),  n=5)
+# topn_UBCF<-predict(UBCF_model, recommenderlab::getData(eval_scheme, "known"), n=5)
+# topn_svd<-predict(SVD_model, recommenderlab::getData(eval_scheme, "known"),  n=5)
+#
+# #YOUR CODE BELOW
+# #Complete evaluation for active users
+# #Copy and adjust the code for evaluation
+# #Calculate precision, recall and RMSE, use the code
+# #from lines 948-989 above
+# #
+```
+
+```{r recommendations_nonactive}
+# eval_scheme_n <- recommenderlab::evaluationScheme(r_nonactive, method="split", train=0.7, given=-1, goodRating=4)
+# # item-based nearest neighbors using cosine similarity
+# IBCF_model_n <- recommenderlab::Recommender(recommenderlab::getData(eval_scheme_n, "train"), method = "IBCF")
+# # used-based nearest neighbors using cosine similarity
+# UBCF_model_n <- recommenderlab::Recommender(recommenderlab::getData(eval_scheme_n, "train"), method = "UBCF")
+# # Funk SVD algorithm
+# SVD_model_n <- recommenderlab::Recommender(recommenderlab::getData(eval_scheme_n, "train"), method = "SVDF", param=list(k=5))
+#
+#
+# topn_IBCF_n <- predict(IBCF_model, recommenderlab::getData(eval_scheme_n, "known"),  n=5)
+# topn_UBCF_n <- predict(UBCF_model, recommenderlab::getData(eval_scheme_n, "known"), n=5)
+# topn_svd_n <- predict(SVD_model, recommenderlab::getData(eval_scheme_n, "known"),  n=5)
+#
+# #YOUR CODE BELOW
+# #Complete evaluation for non-active users
+# #Copy and adjust the code for evaluation:
+# #Calculate precision, recall and RMSE, use the code
+# #from lines 948-989 above
+# #Don't forget to adjust the references
+# #'eval_scheme' to 'eval_scheme_n'
+```
+
+> Check recommendations for a user of your choosing
+
+```{r item_book_recs_nonzero}
+# Save your outputs to a dataframe
+# Remember you need to do this twice:
+# Once for active, once for non active users.
+# Replace topn_IBCF with topn_IBCF_n for nonactive users
+
+#
+# ibcf <- data.frame(user = sort(rep(1:length(topn_IBCF@items), topn_IBCF@n)),
+#     rating = unlist(topn_IBCF@ratings), index = unlist(topn_IBCF@items))
+#
+# ubcf <- data.frame(user = sort(rep(1:length(topn_UBCF@items), topn_UBCF@n)),
+# ubcfrating = unlist(topn_UBCF@ratings), index = unlist(topn_UBCF@items))
+#
+# svd <- data.frame(user = sort(rep(1:length(topn_svd@items), topn_svd@n)),
+#     rating = unlist(topn_svd@ratings), index = unlist(topn_svd@items))
+
+## Save it again for non active users:
+## YOUR CODE BELOW
+
+#
+# ibcf_nonactive <-
+#
+# ubcf_nonactive <-
+#
+# svd_nonactive <-
+
+
+#
+# #Explore both active and less active users
+# #Don't forget, you need to replace ratings_matrix_active with
+# # ratings_matrix_nonactive, and 'ibcf', 'ubcf', 'svd' with
+# # 'ibcf_nonactive','ubcf_nonactive', 'svd_nonactive' etc. in the functions below
+# # to get the recommendations for non-active users.
+# # you also should change the input matrix:
+# # User 5 in the active users dataset and User 5 in the non-active users dataset are different.
+# selected_user <- 5
+#
+# explore_user(selected_user,ratings_matrix_active)
+#
+# # Item based recommendations
+# get_user_recommendations(selected_user, ibcf,ratings_matrix_active)
+#
+# # User based recommendations
+# get_user_recommendations(selected_user, ubcf,ratings_matrix_active)
+#
+# # SVD recommendations
+# get_user_recommendations(selected_user, svd,ratings_matrix_active)
+```
+
+---
+
+# References
+
+- http://machinelearning202.pbworks.com/w/file/fetch/44663680/recommenderlab.pdf
+
+- https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/EvaluationMetrics.TR_.pdf
+
+- http://jmlr.csail.mit.edu/papers/volume10/gunawardana09a/gunawardana09a.pdf
+
+- https://cran.r-project.org/web/packages/recommenderlab/vignettes/recommenderlab.pdf
+
+
+```{r sesinfo}
+sessionInfo()
+```

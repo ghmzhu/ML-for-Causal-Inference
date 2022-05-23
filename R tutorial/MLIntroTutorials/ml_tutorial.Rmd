@@ -1,0 +1,1114 @@
+---
+title: "Data Descriptives, Visualization, & Machine Learning"
+author: "YOUR NAME"
+date: "April 2020"
+output: 
+  html_document:
+    highlight: haddock
+    theme: journal
+    number_sections: no
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+---
+  
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  eval = TRUE,
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE
+)
+```
+
+# Learning Objective:
+You will be able to apply a common set of tools for data analysis in the course and interpret the analysis through clear written and visual output.[^1]
+
+[^1]: This tutorial was originally developed by Susan Athey, Niall Keleher, and Eray Turkel for the Spring 2020 course, ALP301 Data-Driven Impact. We are grateful to [Grant R. McDermott](https://github.com/uo-ec607/lectures), [Ed Rubin](https://edrub.in/ARE212/), [Matthew Taddy](https://github.com/TaddyLab/bds), [Kieran Healy](https://socviz.co/), [Garret Grolemund and Hadley Wickham](https://r4ds.had.co.nz/index.html), and [Bruno Rodrigues](https://www.brodrigues.co/blog/2020-03-08-tidymodels/) and [Julia Silge](https://juliasilge.com/blog/lasso-the-office/). This tuturial draws from the examples that these colleagues made publicly available.
+
+# Introduction
+
+In this tutorial, we will cover topics of reading data into R, producing descriptive statistics, visualizing data, and running statistical models. Several of the topics covered in this tutorial should be review. Some topics, materials, and methods may be new. Please read through the tutorial closely and examine the code closely to get a sense of the steps that are covered.
+
+We have structured this RMarkdown document such that the code chunks are ready for your to run.  You can run individual code chunks by clicking on the green right-facing arrow or by using the `Ctrl+Shift+Enter` key combination. For more information on RMarkdown documents, see the [RMarkdown chapter from R for Data Science](https://r4ds.had.co.nz/r-markdown.html).
+
+Interspersed through the tutorial, we have included sections where your input is required. These are in the form of comprehension checks and assignment questions.
+
+---
+
+### Comprehension Check
+
+> *Here is where we will ask you to interpret or reflect on the data, analysis, or models used.*
+
+> [DISCUSS HERE]
+
+---
+
+## R Packages
+To promote collaborative, reproducible work we will be following a set of guidelines and using a prescribed set of R packages throughout the course. We will make extensive use of the `tidyverse`, "a set of packages that work in harmony because they share common data representations and API design." Check out the [Tidyverse packages](https://www.tidyverse.org/packages/). And for an excellent introduction to R, the tidyverse, and data science, we recommend [R for Data Science](https://r4ds.had.co.nz/).
+
+The following is an RMarkdown "code chunk" to load the `tidyverse` package (sometimes called a library).
+
+```{r load_tidyverse}
+# Ensure that pacman is installed for package management and loading.
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse) # for data reading wrangling and visualization
+```
+
+## Coding Style
+From the start, we want to establish a set of common good practices in writing interpretable, well-commented code in R. If you have not done so already, please review the [tidyverse style guide](https://style.tidyverse.org/) by Hadley Wickham (A shorter, similar style guide can be found at [Google's R Style Guide](https://google.github.io/styleguide/Rguide.html)).
+
+# Load additional required packages
+
+```{r load_packages}
+# for working directories
+pacman::p_load(here)
+# for working with strings
+pacman::p_load(glue)
+# for tables of summary statistics
+pacman::p_load(stargazer)
+# for calculating correlations
+pacman::p_load(corrr)
+# for correlation plots
+pacman::p_load(ggcorrplot)
+# for marginal effects from lineal regressions
+pacman::p_load(margins)
+# Test for linear regression models
+pacman::p_load(lmtest)
+# for robust standard errors
+pacman::p_load(sandwich)
+# meta-framework for model training and testing
+pacman::p_load(tidymodels)
+# for elastic net and lasso
+pacman::p_load(glmnet)
+# for plotting glmnet
+pacman::p_load(plotmo)
+# for classification and regression trees
+pacman::p_load(rpart)
+# for updated ggplot2 theme
+pacman::p_load(hrbrthemes)
+# for updated ggplot2 colorblind-friendly scheme
+pacman::p_load(ggthemes)
+# for combining ggplot2 figures
+pacman::p_load(patchwork)
+# for parallel processing
+pacman::p_load(doFuture)
+```
+
+
+# Data
+
+The data we will be working are from Kevin Arceneaux, Alan S. Gerber and Donald P. Green (2006)'s paper "Comparing Experimental and Matching Methods Using a Large-Scale Voter Mobilization Experiment" ([see article](https://doi.org/10.1093/pan/mpj001)). These data come from a randomized experiment. A research study was conducted in Iowa and Michigan before the 2002 US midterm elections. Households with one or two registered voters were randomly assigned to treatment and control groups. The treatment involved calling the selected individuals by phone for a get-out-the-vote (GOTV) campaign. The study involved over 1.9 million households (1,845,348 in the control group and 59,972 in the group that was assigned to receive the GOTV phone call).
+
+The data that we will use includes information about voting records in elections prior to 2002 as well as several demographic and location variables.
+
+This tutorial assumes that the data is in a folder named "data" with a `.here` file located. We will use the `here` package (See [Practice safe paths from Jennifer Bryan and Jim Hester's book](https://rstats.wtf/safe-paths.html#use-projects-and-the-here-package)) to assist with finding files. We encourage you to work within a RStudio Project (See [Project-oriented workflows](https://rstats.wtf/project-oriented-workflow.html#rstudio-projects)).
+
+Let's read in the data:
+
+```{r read_data}
+# # Download the data from GitHub
+# temp <- tempfile()
+# download.file("https://raw.githubusercontent.com/gsbDBI/ExperimentData/master/Mobilization/ProcessedData/mobilization_with_unlisted.zip", temp)
+#
+# # Unzip the data file and load into memory
+# df <- readr::read_csv(unz(temp, "mobilization_with_unlisted.csv"))
+# unlink(temp)
+
+# # Save the data
+# vroom_write(df, here::here("data", "mobilization.csv"), delim = ",")
+
+# Read in the data
+df <- readr::read_csv(here::here("data", "mobilization.csv"))
+```
+
+Take a look at the data. The `glimpse` function from the `tibble` package is a handy way to check the data types of variables in the data and get a sense of the values that one is working with in the data.
+
+```{r glimpse_data}
+tibble::glimpse(df)
+```
+
+As you can see, the data include `r scales::comma(dim(df)[1])` observations and `r scales::comma(dim(df)[2])` variables. 
+
+Can you start to get a sense of what each variable represents?
+
+Our data is unlabelled, so to help understand some of the variables, here's a list of some key variables that we will work with:
+
+Variable    | Description
+--------    | -------------
+_age_       | Age
+_persons_   | Number of registered voters in household
+_newreg_    | Newly registered voter
+_female_    | Indicator variable where $= 1$ indicates female
+_st_sen_    | Index of state senate district
+_st_hse_    | Index of state congressional district
+_vote00_    | Indicator variable where $= 1$ indicates voted in the 2000 general election
+_vote98_    | Indicator variable where $= 1$ indicates voted in the 1998 midterm election
+_county_    | County index
+_state_     | US State indicator variable where $= 0$ indicates Michigan and $= 1$ indicates Iowa
+_comp_mi_   | Indicator of whether the congressional district was classified as competitive in Michigan
+_comp_ia_   | Indicator of whether the congressional district was classified as competitive in Iowa
+_vote02_    | Indicator variable where $= 1$ indicates voted in the 2002 midterm election
+_treatment_ | Indicator variable specifying the treatment in the experiment
+_contact_   | Indicator of whether the person was contacted (`NA` - indicates an observation with an unlisted phone number)
+
+For this tutorial, we will focus our analysis on the control group, e.g. observations from people that did not receive the GOTV campaign messaging. We will, thus, put aside the observations from people that were included in the campaign. Additionally, we are going to restrict our analysis to use the subset of variables listed above. For computational reasons, we will restrict our analysis to the largest county.
+
+```{r control_sample}
+
+# We will retain a subset of the variables for our analysis
+covariate_names <- c("age", "persons", "newreg", "vote00", "vote98", "female", "st_sen", "st_hse")
+
+mobilize_df <- df %>%
+  # Keep the control group
+  filter(treatment == 0) %>%
+  # Keep the largest county
+  filter(county == 82) %>%
+  # select the variables of interest
+  select(vote02, all_of(covariate_names)) %>%
+  # drop observations missing female indicator
+  drop_na(female)
+
+# Remove the full data from memory
+rm(df)
+```
+
+# Descriptive Statistics
+
+To get a quick understanding of the variables, it's often useful to summarize the data. One way to do so is the `summary` function.
+
+```{r summary_stats}
+summary(mobilize_df)
+```
+
+That's a bit overwhelming when we have lots of variables. Instead, we can get the mean and standard deviation of individual variables.
+```{r mean_sd}
+glue::glue("Mean household size:", round(mean(mobilize_df$persons), digits = 4))
+glue::glue("Standard deviation:", round(sd(mobilize_df$persons), digits = 4))
+```
+
+We can also use the `stargazer` function to produce easy to read summary statistics tables.
+
+```{r stats_table}
+stargazer::stargazer(as.data.frame(mobilize_df), summary = TRUE, type = "text")
+```
+
+# Data Visualization
+
+A good way to get to know the data is to produce some data visualizations. Let's take a look at a few of the variables. First, we'll look a univariate visualizations.
+
+Relying on the tidyverse, let's produce a histogram of age in 2002 (`age`) with `ggplot2`.
+
+```{r age_hist}
+# Try out a few different ggplot themes to see which one you find most accessible
+theme_set(hrbrthemes::theme_ipsum())
+# theme_set(ggplot2::theme_minimal())
+# theme_set(ggthemes::theme_base())
+# theme_set(ggthemes::theme_tufte())
+
+ggplot2::ggplot(data = mobilize_df, aes(x = age)) +
+  geom_histogram()
+```
+
+We can compare the distribution of age among those that voted in the 2002 midterm election by gender.
+
+```{r age_female_hist}
+
+# Labels for voting
+vote_labs <- c("Didn't Vote", "Voted")
+names(vote_labs) <- c("0", "1")
+
+# Labels for gender
+gender_labs <- c("Male", "Female")
+names(gender_labs) <- c("0", "1")
+
+mobilize_df %>%
+  # convert female variable to factor variable for plotting
+  mutate(female = as.factor(female)) %>%
+  ggplot(aes(x = age, color = female, fill = female)) +
+  # set number of bins
+  geom_histogram(bins = 20) +
+  # grid by vote02 and female
+  facet_grid(vote02 ~ female,
+    labeller = labeller(vote02 = vote_labs, female = gender_labs)
+  ) +
+  # use a colorblind friendly color palette
+  scale_color_colorblind() +
+  scale_fill_colorblind() +
+  # drop the legend
+  guides(color = FALSE, fill = FALSE) +
+  labs(
+    title = "Age",
+    subtitle = "By gender and voting record in the 2002 midterm election"
+  )
+```
+
+---
+
+### Comprehension Check
+
+> *Using the code for the previous figure, create a 2-by-2 grid of figures showing the age distribution where the columns correspond to whether or not a person voted in 2000 (`vote00`) and the rows correspond to whether or not the person voted in 2002 (`vote02`).*
+
+```{r age_vote00_hist, eval=FALSE, include=TRUE}
+
+# Labels for voting
+vote_labs <- c("Didn't Vote", "Voted")
+names(vote_labs) <- c("0", "1")
+
+mobilize_df %>%
+  # convert vote00 variable to factor variable for plotting
+  mutate(vote00 = as.factor(vote00)) %>%
+  ggplot(aes(x = age, color = vote00, fill = vote00)) +
+  # set number of bins
+  geom_histogram(bins = 20) +
+  # [YOUR CODE HERE]
+  labs(
+    title = "Age",
+    subtitle = "By voting in 2000 and 2002"
+  )
+```
+
+---
+
+# T-tests
+
+Let's formally test for differences in age. We want to conduct a hypothesis test of whether the age of those who voted in the 2002 midterm election are older than those that did not vote.
+
+Formally, what we are doing is setting up a null hypothesis, $H_{0}$, where the mean age of voters and non-voters are equivalent. Our alternative hypothesis, $H_{1}$ is that the mean age of the two populations are not equal.
+
+- $H_{0}: \mu_{1} = \mu_{2}$
+- $H_{1}: \mu_{1} \neq \mu_{2}$
+
+We will use [Welch's t-test](https://en.wikipedia.org/wiki/Welch%27s_t-test), under which we assume that the data from the two groups follow a normal distribution. However, we do not require that the data from the two populations have the same variance.
+
+Welch's t-test:
+
+- Test statistic: $\frac{\mu_{1} - \mu_{2}}{\sqrt{\frac{s_{1}^2}{n_{1}} + \frac{s_{2}^2}{n_{2}}}}$
+- Degrees of Freedom (DOF): $\frac{(\frac{s_{1}^2}{n_{1}} + \frac{s_{2}^2}{n_{2}})^2}{(\frac{s_{1}^2}{n_{1}})^2 + (\frac{s_{2}^2}{n_{2}})^2}$ 
+
+First, we will test if the mean age of people who voted is different from the mean age of people that did not vote.
+
+```{r ttest_age}
+tidy(t.test(age ~ vote02,
+  data = mobilize_df,
+  var.equal = FALSE,
+  alternative = "less",
+  conf.level = 0.95
+)) %>%
+  select(
+    estimate1, estimate2, estimate, conf.low,
+    conf.high, p.value, statistic, parameter
+  ) %>%
+  rename(
+    `Didn't Vote` = estimate1,
+    `Voted` = estimate2,
+    `Difference` = estimate,
+    `Low` = conf.low,
+    `High` = conf.high,
+    `T-Stat` = statistic,
+    `DOF` = parameter,
+  ) %>%
+  knitr::kable(digits = 2) %>%
+  kableExtra::kable_styling(bootstrap_options = "striped") %>%
+  kableExtra::add_header_above(c(
+    "Mean Age" = 3,
+    "95% Confidence Interval" = 2,
+    "Test Statistics" = 3
+  )) %>%
+  kableExtra::add_header_above(c("Difference in Mean Age, 
+                                 Welch Two Sample, 
+                                 One-sided t-test" = 8),
+    align = "left"
+  )
+```
+
+We reject the null hypothesis that the mean age of those that voted in the 2002 midterm election is equal to the mean age of non-voters. We find that votes are, on average, older than non-voters.
+
+Now let's test for equality of mean voting rates by gender. This time we will use a one-sided test, where our hypothesis is that women voters in the 2002 midterm election were older than women non-voters.
+
+```{r ttest_age_female}
+tidy(t.test(age ~ vote02,
+  data = filter(mobilize_df, female == 1),
+  var.equal = FALSE,
+  alternative = "less",
+  conf.level = 0.95
+)) %>%
+  select(
+    estimate1, estimate2, estimate, conf.low,
+    conf.high, p.value, statistic, parameter
+  ) %>%
+  rename(
+    `Didn't Vote` = estimate1,
+    `Voted` = estimate2,
+    `Difference` = estimate,
+    `Low` = conf.low,
+    `High` = conf.high,
+    `T-Stat` = statistic,
+    `DOF` = parameter,
+  ) %>%
+  knitr::kable(digits = 2) %>%
+  kableExtra::kable_styling(bootstrap_options = "striped") %>%
+  kableExtra::add_header_above(c(
+    "Mean Age" = 3,
+    "95% Confidence Interval" = 2,
+    "Test Statistics" = 3
+  )) %>%
+  kableExtra::add_header_above(c("Difference in Mean Age (Women), 
+                                 Welch Two Sample, 
+                                 One-sided t-test" = 8),
+    align = "left"
+  )
+```
+
+Similarly, for men:
+
+```{r ttest_age_male}
+tidy(t.test(age ~ vote02,
+  data = filter(mobilize_df, female == 0),
+  var.equal = FALSE,
+  alternative = "less",
+  conf.level = 0.95
+)) %>%
+  select(estimate1, estimate2, estimate, conf.low, conf.high, p.value, statistic, parameter) %>%
+  rename(
+    `Didn't Vote` = estimate1,
+    `Voted` = estimate2,
+    `Difference` = estimate,
+    `Low` = conf.low,
+    `High` = conf.high,
+    `T-Stat` = statistic,
+    `DOF` = parameter,
+  ) %>%
+  knitr::kable(digits = 2) %>%
+  kableExtra::kable_styling(bootstrap_options = "striped") %>%
+  kableExtra::add_header_above(c(
+    "Mean Age" = 3,
+    "95% Confidence Interval" = 2,
+    "Test Statistics" = 3
+  )) %>%
+  kableExtra::add_header_above(c("Difference in Mean Age (Men), 
+                                 Welch Two Sample, 
+                                 One-sided t-test" = 8),
+    align = "left"
+  )
+```
+
+
+---
+
+### Comprehension Check
+
+> *Using the code above as a template, test the hypothesis that women voted at a higher rate, on average, than men in the 2002 midterm election. (Hint: use a one-sided test).*
+
+```{r check2}
+# [YOUR CODE HERE]
+```
+
+---
+
+# Correlation
+
+Next, we want to explore linear correlation across the variables. 
+
+We can visualize the correlation coefficients with a correlation plot using the `ggcorrplot` function in tandem with the `cor` function that produces a correlation matrix.
+
+```{r corr_plot}
+covariate_names <- names(mobilize_df)
+
+corr <- cor(mobilize_df,
+  use = "pairwise.complete.obs"
+)
+
+# Replace NA values with zero
+corr[is.na(corr)] <- 0
+
+# Organize variables by heirarchical clustering
+ggcorrplot::ggcorrplot(corr,
+  hc.order = TRUE,
+  type = "full",
+  lab = FALSE,
+  legend.title = "Correlation Coefficient",
+  colors = c("#053061", "white", "#67001f"),
+  ggtheme = ggplot2::theme_void,
+  outline.col = "white"
+) +
+  theme(
+    legend.position = "top",
+    axis.title.x = element_blank(),
+    axis.text.x = element_text(size = 10),
+    axis.ticks.x = element_blank(),
+    axis.text.y = element_text(size = 10),
+    axis.title.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+```
+
+As we can see, there are a few variables that are highly correlated. When we come to the statistical modeling section of the tutorial, high correlation between variables is something that we want to be cognizant of.
+
+What variables correlate with whether a person voted in the 2002 midterm election?
+
+```{r corr_vote02}
+# Convert correlation matrix to data frame
+corrr::as_cordf(corr) %>%
+  # Focus on the 2002 vote variable
+  corrr::focus(vote02) %>%
+  # Get the absolute value of the correlation coefficient
+  mutate(vote02 = abs(vote02)) %>%
+  # Sort variables by absolute value of correlation coefficient
+  arrange(-vote02) %>%
+  # Clean up headers
+  rename(`Correlation with vote02` = rowname) %>%
+  rename(corr_coef = vote02) %>%
+  knitr::kable(digits = 4) %>%
+  kableExtra::kable_styling(bootstrap_options = "striped")
+```
+
+---
+
+### Comprehension Check
+
+> *In 2-3 sentences, discuss the correlation coefficients observed in the table above. Do they match your intuition?*
+
+> [DISCUSS HERE]
+
+---
+
+# Linear Regression
+
+Let's now move to linear regression to check for correlation between the voting outcome and covariates. First, we'll use the `lm` function from the `stats` package. Here is a bivariate regression where we regress an indicator of a person's gender on whether or not that person voted in the 2002 midterm election.
+
+The underlying model that we are using is:
+
+$Y_{i} = \beta_{0} + \beta_{1} X_{i} + u_{i}$
+
+where $Y_{i}$ is our outcome of interest, "Voted in 2002 midterm election" and $\beta_{1}$, the coefficient of interest, gives us a measure of how much $X$ and $Y$ _covary_, adjusting for the variance of $X$ in our population. We take a data-driven approach to estimating that relationship.
+
+
+```{r lm_model}
+ols_lm1 <- lm(vote02 ~ age,
+  data = mobilize_df
+)
+
+broom::tidy(ols_lm1) %>%
+  # round values
+  knitr::kable(digits = 4) %>%
+  # Clean table formating
+  kableExtra::kable_styling(bootstrap_options = "striped")
+```
+
+Based on this bivariate regression, we estimate that for each additional year of age, an individual is 0.65 percentage points more likely to have voted in the 2002 election. This is consistent with what we observed in the t-tests. 
+
+We can move to a more general linear regression model, the multivariate regression. 
+
+$Y_{i} = X\beta + u_{i}$
+
+Where $X$ is a matrix of variables (or covariates) and $\beta$ is a vector of coefficients.
+
+Building on our previous regression, let's add gender to the regression.
+
+```{r lm_model2}
+ols_lm2 <- lm(vote02 ~ age + female,
+  data = mobilize_df
+)
+```
+
+Usually, we will be concerned about heteroskedacity in our data. That is, the variance of our estimates may be dependent on covariates. To adjust for heteroskedacity, there are a number of way to calculate heteroskedastic-robust standard errors. Here, we'll use the `lmtest` package in tandem with the `sandwich` package to report heteroskedastic-robust standard errors.
+
+```{r lm_robust_se}
+
+# report heteroskedasticity-robust standard errors
+lmtest::coeftest(ols_lm2,
+  vcov = sandwich::vcovHC(ols_lm2, type = "HC2")
+) %>%
+  broom::tidy() %>%
+  knitr::kable(digits = 4) %>%
+  kableExtra::kable_styling(bootstrap_options = "striped")
+```
+
+# Logistic Regression
+
+Because our outcome is a binary variable, we can approach the modeling as a classification problem. As such, let's switch to logistic regression.
+
+```{r logit_age_fem}
+logit_age_fem <- glm(vote02 ~ age + female,
+  data = mobilize_df,
+  family = binomial(link = "logit")
+)
+
+lmtest::coeftest(logit_age_fem,
+  vcov = sandwich::vcovHC(logit_age_fem, type = "HC2")
+) %>%
+  broom::tidy() %>%
+  knitr::kable(digits = 4) %>%
+  kableExtra::kable_styling(bootstrap_options = "striped")
+```
+
+Recall that the coefficients from the logistic regression model are _not_ interpreted in the same way as coefficients from the linear model. Whereas coefficient from the `lm` model are interpreted as the expected change in Y for a change in X. The coefficients from the `glm` model are the change in the "log odds" as X changes. 
+
+We can get an analogous average marginal effect from the `glm` coefficents using the `margins` function. You can confirm that the values for the average marginal effect resemble those from the linear regression.
+
+
+```{r ame}
+# Calculate average marginal effects
+margins::margins(logit_age_fem)
+```
+
+We've seen that age is correlated with whether or not a person voted in the 2002 midterm election. However, it's likely that a person's propensity to vote diminishes at some point with age. So, we'll include a quadratic term for age.
+
+```{r logit_model_age2}
+logit_age2 <- glm(vote02 ~ age + I(age^2) + female,
+  data = mobilize_df,
+  family = binomial(link = "logit")
+)
+
+lmtest::coeftest(logit_age2,
+  vcov = sandwich::vcovHC(logit_age2, type = "HC2")
+) %>%
+  broom::tidy() %>%
+  knitr::kable(digits = 4) %>%
+  kableExtra::kable_styling(bootstrap_options = "striped")
+```
+
+We see from the the table above and the following figure that the fitted values of the likelihood that a person voted in 2002 follow an "inverted U" shape as age increases.
+
+```{r margins_logit_age, include=FALSE}
+margins_age <- cplot(logit_age2,
+  x = "age", data = mobilize_df,
+  draw = FALSE,
+  vcov = sandwich::vcovHC(logit_age2, type = "HC2")
+)
+```
+
+```{r marginsplot_logit}
+ggplot(margins_age, aes(x = xvals)) +
+  geom_line(aes(y = yvals)) +
+  geom_line(aes(y = upper), linetype = 2) +
+  geom_line(aes(y = lower), linetype = 2) +
+  geom_hline(yintercept = 0) +
+  labs(
+    title = "Relationship between age and voting in 2002",
+    x = "Age", y = "Predicted likelihood of voting"
+  )
+```
+
+```{r logit_interaction}
+logit_interaction <- glm(vote02 ~ female * age + female * I(age^2),
+  data = mobilize_df,
+  family = binomial(link = "logit")
+)
+
+lmtest::coeftest(logit_interaction, vcov = sandwich::vcovHC(logit_interaction, type = "HC2")) %>%
+  broom::tidy() %>%
+  knitr::kable(digits = 4) %>%
+  kableExtra::kable_styling(bootstrap_options = "striped")
+```
+
+
+```{r margins_logit_gender, include=FALSE}
+margins_female <- cplot(logit_interaction,
+  x = "age", data = mobilize_df[mobilize_df[["female"]] == 1, ],
+  draw = FALSE,
+  vcov = sandwich::vcovHC(logit_interaction, type = "HC2")
+)
+
+margins_male <- cplot(logit_interaction,
+  x = "age", data = mobilize_df[mobilize_df[["female"]] == 0, ],
+  draw = FALSE,
+  vcov = sandwich::vcovHC(logit_interaction, type = "HC2")
+)
+```
+
+```{r marginsplot_logit_gender}
+cfemale <- ggplot(margins_female, aes(x = xvals)) +
+  geom_line(aes(y = yvals), color = "red") +
+  geom_line(aes(y = upper), linetype = 2) +
+  geom_line(aes(y = lower), linetype = 2) +
+  geom_hline(yintercept = 0) +
+  labs(
+    title = "Women",
+    subtitle = "",
+    x = "Age", y = "Likelihood of voting"
+  )
+
+cmale <- ggplot(margins_male, aes(x = xvals)) +
+  geom_line(aes(y = yvals), color = "blue") +
+  geom_line(aes(y = upper), linetype = 2) +
+  geom_line(aes(y = lower), linetype = 2) +
+  geom_hline(yintercept = 0) +
+  labs(
+    title = "Men",
+    # subtitle = "Men",
+    x = "Age", y = ""
+  )
+
+cfemale + cmale
+```
+
+We can see from the regression table and the figure that older people were observed to vote at a higher rate. However, we do not observe a difference in voting rates between women and men.
+
+---
+
+### Comprehension Check
+
+> *We have described the relationship between covariates and the outcome as correlation. We want to be cautious about interpreting the relationships as causal. One primary reason is that there are likely variables omitted from our model that are correlated with the likelihood of voting _and_ the covariates included in the regression above. In 3-5 sentences, interpret the table and describe some of the factors that may be omitted from these simple regressions that we want to be concerned about when interpreting the estimates from the regressions above.*
+
+> [DISCUSS HERE]
+
+---
+
+
+# Machine Learning
+
+Now, let's bring in some steps from machine learning to set up a predictive model of whether or not a person voted in the 2002 midterm election.
+
+## Train-Test Split
+
+First, we will split our data into **training set** and **test set**. We will holdout 80% of the data as a test dataset to evaluate our "best" model at the final step. The test set is often referred to as the holdout data.
+
+```{r split_data}
+# Set the seed and run the full code chunk
+set.seed(200004)
+
+# Holdout 80% of the data for model validation
+mobilize_split <- rsample::initial_split(mobilize_df, prop = 0.8)
+mobilize_split
+```
+
+Create a training set and a holdout set.
+
+```{r train_test_set}
+mobilize_train <- rsample::training(mobilize_split)
+mobilize_test <- rsample::testing(mobilize_split)
+```
+
+## Preprocessing
+We will do some data preprocessing to prepare for our models
+
+```{r build_recipe}
+mobilize_rec <- recipes::recipe(vote02 ~ .,
+  data = mobilize_train
+) %>%
+  # convert outcome to factor
+  recipes::step_mutate(
+    vote02 = as.factor(vote02),
+    role = "outcome"
+  ) %>%
+  # Impute mean for all numeric variables with missing values
+  recipes::step_meanimpute(recipes::all_numeric()) %>%
+  # remove any variables with near-zero variance
+  recipes::step_nzv(recipes::all_predictors()) %>%
+  # remove variables with 0.8 correlation coefficient or higher
+  recipes::step_corr(recipes::all_predictors(),
+    threshold = 0.8,
+    use = "pairwise.complete.obs",
+    method = "pearson"
+  ) %>%
+  recipes::step_mutate(
+    # convert senate district to a factor
+    st_sen = as.factor(st_sen),
+    # convert congressional district to a factor
+    st_hse = as.factor(st_hse),
+    # create age-squared variable
+    age2 = age^2
+  ) %>%
+  # Convert all factor variables to binary/dummy variables
+  recipes::step_dummy(recipes::all_nominal(), -recipes::all_outcomes(),
+    one_hot = FALSE, preserve = FALSE
+  )
+
+mobilize_prep <- mobilize_rec %>%
+  recipes::prep(retain = TRUE)
+
+mobilize_train_prepped <- recipes::juice(mobilize_prep)
+mobilize_test_prepped <- recipes::bake(mobilize_prep,
+  new_data = mobilize_test
+)
+```
+
+After all of the steps above, we can see that we have added several new variables to our data.
+
+```{r prepped_covariates}
+# vote02 is dropped because outcome variable is now a factor.
+stargazer::stargazer(as.data.frame(mobilize_train_prepped),
+  summary = TRUE, type = "text"
+)
+```
+
+## Models
+
+We are going to use a few models to predict whether or not a person voted in the 2020 election. logistic regression, lasso, and classification trees to predict whether or not a person voted in the 2002 midterm election. 
+
+### Lasso
+
+One of the central tools of many machine learning tools is **regularization**. When we are working with a large number of variables to predict an outcme, we want to be especially careful about extrapolating results from the data sample that we have to a data sample that we do not have. This is often refered to as out-of-sample performance. Namely, we want to set up data-driven models in a manner that is sensitive to variance of our analysis when we trying to apply our analysis in a new setting. Regularization is a step included in machine learning to penalize our models for complexity (or including so many variables that we overfit to our training sample). 
+
+A direct like between linear/logistic regression can be made to regularization using the [lasso algorithm](https://en.wikipedia.org/wiki/Lasso_(statistics)). The lasso is modification to linear and logistic regression that includes a penalty term, "lambda", that is use to enumerate a number of candidate models from which we can select the best performing model. 
+
+In R, we can run a lasso using the `glmnet` function.
+
+```{r lasso_mod}
+
+# The glmnet function requires that we input a matrix of
+# our covariates and an array of the outcome variable
+x <- model.matrix(~., data = select(
+  mobilize_train_prepped,
+  -vote02
+))
+y <- as.matrix(select(mobilize_train_prepped, vote02))
+
+# Run the lasso using glmnet
+lasso_fit <- glmnet::glmnet(x, y,
+  family = "binomial",
+  alpha = 1
+)
+
+# Remove the x and y matrix
+rm(x, y)
+
+# Plot the regularization paths
+plotmo::plot_glmnet(lasso_fit)
+```
+
+The figure above shows the path that the coefficients for each covariate follows as the value of the penalty term -- lambda -- decreases.
+
+On the left-hand side we see that the coefficients are all zero. That is point at which the penalty term (lambda) fully drowns out the relationship between the covariates and the outcome variable.
+
+On the right-hand side is our model will no penalty, e.g. lambda equals zero. This is analogous to the non-regularized logistic regression model that we saw in the previous section.
+
+### Decision Tree
+
+Another common foundation in machine learning models is the decision tree, which is a heirarchical approach to modelling the relationship between inputs (our covariates) and outputs. The decision tree algorithm implements a series of steps to split the data into groups that are most similar. Stating from the top of the heirarchy, the algorithm makes splits, dividing the data based on a covariate. The algorithm continues until it reaches final nodes (often called leaf nodes or terminal nodes). We can run a classification tree with our training data using the `rpart` function. For demonstration, we'll set the complexity parameter, `cp` at a fixed value.
+
+```{r tree_mod}
+# Set the seed and run the full code chunk
+set.seed(200004)
+
+# Fit the classsification tree
+tree_fit <- rpart::rpart(vote02 ~ .,
+  data = mobilize_train,
+  cp = 0.001
+)
+
+# Plot the tree
+rpart.plot::rpart.plot(tree_fit)
+```
+
+
+## Cross Validation
+
+Ok, so we've seen how to fit three different models to our training data, logistic regression, lasso, and decision trees. Let's bring them all together into a framework for evaluating models.
+
+Another tool that we implement though machine learning is **cross validation**. The motivation behind cross validation is that we want to train models that have good out-of-sample prediction. By "good", we could mean that the model has low variance, high accuracy, or a number of other measures. We'll comeback to deciding on the appropriate metrics but the way that we derive quantitative measures of the goodness of model fitness is to split our data into "folds." The data are randomly split to increase the likelihood that we are generating representative sample of the full data within each fold.
+
+Cross validation is the concept of holding aside one fold, training our model on the remaining folds, and then measuring goodness of fit on the fold that was held out. This held out fold is often referred to as the **validation fold**. It's not to be confused with the test data, which was a portion of our data that was put aside and never touched during the model training phase.
+
+Let's apply cross-validation to our data. We will use 5-fold cross validation (you are welcome to change the number of folds; 3, 5, and 10-fold are common).
+
+
+```{r cv_split}
+# Set the seed and run the full code chunk
+set.seed(202004)
+
+# Split the data into cross validation folds,
+# stratify by congressional district
+mobilize_cv_splits <- rsample::vfold_cv(mobilize_train, v = 5, strata = st_hse)
+
+# print the object to confirm
+mobilize_cv_splits
+```
+
+
+Now, we are going to use a unifying framwork to train our models. For this tutorial, we will work with the `tidymodels` framework for machine learning. `tidymodels` is a "meta-package" that incorporates a number of other packages that make the machine learning pipeline consistent for many commonly-used machine learning algorithms.
+
+We will work with the same models that we have seen already in this tutorial: logistic regression, lasso, and decision trees.
+
+First, we initialize the workflow by assigning the preprocessing recipe that we created earlier.
+
+```{r initialize_workflow}
+
+mobilize_workflow <- workflows::workflow() %>%
+  workflows::add_recipe(mobilize_rec)
+```
+
+Next, we declare the three models that we want to train using the `parsnip` package. We will use the `glm` package for logistic regression, `glmnet` package for lasso, and `rpart` package for decision trees. Declare these packages as the "engine" for each specification. For all three models, we will be using classification.
+
+```{r declare_models}
+
+# Logistic Regression
+glm_spec <- parsnip::logistic_reg() %>%
+  parsnip::set_engine("glm") %>%
+  parsnip::set_mode("classification")
+
+# Lasso
+lasso_spec <- parsnip::logistic_reg(
+  penalty = 0.01,
+  mixture = 1
+) %>%
+  parsnip::set_engine("glmnet") %>%
+  parsnip::set_mode("classification")
+
+# Decision Tree
+tree_spec <- parsnip::decision_tree(cost_complexity = 0.001) %>%
+  parsnip::set_engine("rpart") %>%
+  parsnip::set_mode("classification")
+```
+
+Next, run the cross-validation! In order to do so, we are using the `fit_resamples` function from the `tune` package. This allows us to extract the performance metrics for each fold of each model.
+
+Performance metrics are the measures of goodness of fit that we previously mentioned. Deciding on the performance metric is a key decision in the machine learning pipeline. It is something that we will comeback to a number of times throughout the course. In our set up, we will evaluate model performance using the following performance metrics:
+
+- **Accuracy** - this is portion of the observation that are predicted correctly
+- **Area Under the ROC Curve (AUC)** - this is a common method of assessing the preformance of binary classification, as it balances the true positive rate (TPR, or specificity) with the false positive rate (FPR, or 1 - sensitivity). Values close to 0.50 are little better than picking at random while values close to 1 maximize the true positive rate without inducing many false positives. See [Receiver operating characteristic](https://en.wikipedia.org/wiki/Receiver_operating_characteristic)
+
+The true value of cross validation comes into play when we are evaluating performance metrics. In effect, what we are doing (and what happens under-the-hood in the following code) is to train each model on 4 folds of the data, calculate the performance metrics on those 4 folds, then calculate the error in the validation fold. We don't want to over-interpret the performance metrics from the training folds, instead the validation fold gives us a more reliable estimate of the out-of-sample performance.
+
+```{r cv_mods}
+# Set the seed and run the full code chunk
+set.seed(202004)
+
+# Cross validate logistic regression model
+glm_cv <- tune::fit_resamples(
+  mobilize_rec,
+  glm_spec,
+  mobilize_cv_splits,
+  metrics = yardstick::metric_set(accuracy, roc_auc),
+  control = tune::control_resamples(save_pred = TRUE)
+)
+
+# Cross validate lasso model
+lasso_cv <- tune::fit_resamples(
+  mobilize_rec,
+  lasso_spec,
+  mobilize_cv_splits,
+  metrics = yardstick::metric_set(accuracy, roc_auc),
+  control = tune::control_resamples(save_pred = TRUE)
+)
+
+# Cross validate decision tree model
+tree_cv <- tune::fit_resamples(
+  mobilize_rec,
+  tree_spec,
+  mobilize_cv_splits,
+  metrics = yardstick::metric_set(accuracy, roc_auc),
+  control = tune::control_resamples(save_pred = TRUE)
+)
+```
+
+Let's check the average accuracy and AUC (area under the curve) metrics from the cross-validated models.
+
+```{r glm_cv_metrics}
+glm_cv %>%
+  tune::collect_metrics()
+```
+
+```{r lasso_cv_metrics}
+lasso_cv %>%
+  tune::collect_metrics()
+```
+
+```{r tree_cv_metrics}
+tree_cv %>%
+  tune::collect_metrics()
+```
+
+As we can see above, accuracy and AUC are fairly similar across the three models. Note that for the lasso and tree models, we did not do any model tuning. Let's see if we can improve performance using model tuning.
+
+## Model Tuning
+
+Let's go back to the lasso model. Instead of setting the `penalty` parameter at a fixed value, we can use a data-driven approach to selecting the prefered value of our parameters. This is whene model tuning comes into play.
+
+Tuning involves supplying a list of values, or a "grid", and training the models with each of the values. Importance to notice is that for each value (or set of values if tuning multiple values), we implement cross validation.
+
+With our same set up, let's tune the `penalty` parameter. Note that we could also tune the `mixture` paramater if we wanted to use a full elastic net regularization that is possible using the `glmnet` package.
+
+*Note: the following code takes some time to run, we set up parallel processing to help cut down on the required time.*
+
+```{r tune_lasso}
+# Set the seed and run the full code chunk
+set.seed(202004)
+
+# Set up parallel processing
+all_cores <- parallel::detectCores(logical = FALSE)
+doFuture::registerDoFuture()
+cl <- parallel::makeCluster(all_cores)
+future::plan("cluster", workers = cl)
+
+# tune penalty parameter
+tune_lasso <- parsnip::logistic_reg(
+  penalty = tune(),
+  mixture = 1
+) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+
+# Hyperparameter grid
+lambda_grid <- dials::grid_regular(penalty(), levels = 50)
+
+lasso_tuned <- tune::tune_grid(
+  mobilize_workflow %>% add_model(tune_lasso),
+  resamples = mobilize_cv_splits,
+  grid = lambda_grid,
+  metrics = yardstick::metric_set(accuracy, roc_auc)
+)
+
+```
+
+Take a look at the penalty values with the highest accuracy values.
+
+```{r lasso_accuracy}
+# Best tuned models for AUC
+tune::show_best(lasso_tuned, "accuracy") %>%
+  select(penalty, .metric, mean, std_err)
+```
+
+
+And the highest AUC values.
+
+```{r lasso_auc}
+# Best tuned models for AUC
+tune::show_best(lasso_tuned, "roc_auc") %>%
+  select(penalty, .metric, mean, std_err)
+```
+
+Let's look at the full path of the performance metrics as the penalty term varied.
+
+```{r plot_metrics}
+
+# Plot metrics
+tune::collect_metrics(lasso_tuned) %>%
+  ggplot(aes(x = penalty, y = mean, color = .metric)) +
+  geom_line() +
+  scale_color_colorblind() +
+  theme(legend.position = "top") +
+  labs(color = "Performance Metric")
+```
+
+We find that tuning provides some improvement in the performance of the lasso model. Given that our models have only a few covariates. The models with very low penalty terms tend to perform better. From the figure above, we see that accuracy levels off at penalty values below 0.15. However, the AUC metric continues to incrase until the non-penalized model is reached.
+
+We will leave it as an exercise to you to explore more complex models with interaction terms and polynomial terms in the models. To implement data transformations, explore the `recipes::step_interact` for interactions between covariates `recipes::step_bs` and `recipes::step_poly`  function for adding basis functions or polynomial terms.
+
+Now that we've tune our model, we can extract the best model and apply it to the full training data.
+
+```{r best_model}
+highest_accuracy <- lasso_tuned %>%
+  tune::select_best("accuracy", maximize = TRUE)
+```
+
+```{r final_model}
+output_lasso <- tune::finalize_workflow(
+  mobilize_workflow %>% add_model(tune_lasso),
+  highest_accuracy
+)
+```
+
+```{r fit_final_lasso}
+lasso_fitted <- output_lasso %>%
+  # fit the final model on the full training set
+  fit(data = mobilize_train)
+```
+
+Take a look at the coefficients from the best model.
+
+```{r best_lasso_coefs}
+lasso_coefs <- lasso_fitted$fit$fit$fit %>%
+  broom::tidy() %>%
+  # filter out the intercept term
+  filter(term != "(Intercept)") %>%
+  select(-step, -dev.ratio)
+
+delta <- abs(lasso_coefs$lambda - highest_accuracy$penalty)
+lambda_opt <- lasso_coefs$lambda[which.min(delta)]
+
+labelled_coefs <- lasso_coefs %>%
+  mutate(abs_estimate = abs(estimate)) %>%
+  filter(abs_estimate >= 0.01) %>%
+  distinct(term) %>%
+  inner_join(lasso_coefs, by = "term") %>%
+  filter(lambda == lambda_opt) %>%
+  select(term, estimate)
+
+labelled_coefs
+```
+
+---
+
+### Comprehension Check
+
+> *Now it's your turn, try out a few different values for the penalty term. How do the variables and coefficients from the lasso model change as you change the `penalty.val`? Try some values close to 0.1 and some values below 0.01. Provide 3-5 sentence as comment below.*
+
+```{r check_lambda, include=TRUE}
+
+##############################
+# Change the penalty value
+penalty.val <- 0.1
+##############################
+
+check_lasso <- tune::finalize_workflow(
+  mobilize_workflow %>% add_model(tune_lasso),
+  list(penalty.val)
+)
+
+lasso_fitted <- check_lasso %>%
+  # fit the final model on the full training set
+  fit(data = mobilize_train)
+
+lasso_coefs <- lasso_fitted$fit$fit$fit %>%
+  broom::tidy() %>%
+  # filter out the intercept term
+  filter(term != "(Intercept)") %>%
+  select(-step, -dev.ratio)
+
+delta <- abs(lasso_coefs$lambda - penalty.val)
+lambda_opt <- lasso_coefs$lambda[which.min(delta)]
+
+labelled_coefs <- lasso_coefs %>%
+  distinct(term) %>%
+  inner_join(lasso_coefs, by = "term") %>%
+  filter(lambda == lambda_opt) %>%
+  select(term, estimate)
+
+labelled_coefs
+```
+
+> [DISCUSS HERE]
+
+---
+
+Finally, let's apply best model from our model tuning to our holdout set. We can use the `last_fit` function from the `tune` package to carry out this step.
+
+```{r holdout_metrics}
+test_fit <- tune::last_fit(
+  output_lasso,
+  mobilize_split
+)
+
+test_fit %>%
+  collect_metrics()
+
+parallel::stopCluster(cl)
+```
+
+---
+
+### Comprehension Check
+
+> *Let's say that you are contacted by a non-partisan organization that is seeking to identify voters that are less likely to vote in the 2020 US federal general election. The organization wants to focus its resources on encouraging unlikely voters to go to the polls in November. Based on the analysis above, what recommendations would you provide? What additional data would would you recommend that the organization collect to accurately predict whether a person is likely to vote?*
+
+> [DISCUSS HERE]
+
+
+---
+
+# References
+
+- R for Data Science by Garret Grolemund and Hadley Wickham (https://r4ds.had.co.nz/index.html)
+- Data Visualization by Kieran Healy (https://socviz.co/)
+- Julia Silge provided excellent blog posts on tidymodels (https://juliasilge.com/blog/) as did Bruno Rodrigues (https://www.brodrigues.co/blog/2020-03-08-tidymodels/)
+- Grant McDermott's lecture slides from 'Data Science for Economists' (https://github.com/uo-ec607/lectures)
+- Ed Rubin's lecture notes and slides are fantastic (https://edrub.in/teaching.html)
+- Matt Taddy provided replication code on GitHub for Business Data Science (https://github.com/TaddyLab/bds)
+
+
+```{r sesinfo}
+sessionInfo()
+```
